@@ -20,7 +20,7 @@ from typing import Optional
 
 import pandas as pd
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
+from py_clob_client.clob_types import ApiCreds, OrderArgs
 from py_clob_client.order_builder.constants import BUY, SELL
 
 from strategies.base import BaseStrategy, Signal, SignalType
@@ -75,16 +75,45 @@ class Trader:
     # ------------------------------------------------------------------
 
     def connect(self):
-        """Initialise and authenticate the CLOB client."""
-        creds = ApiCreds(
-            api_key=os.environ["POLY_API_KEY"],
-            api_secret=os.environ["POLY_API_SECRET"],
-            api_passphrase=os.environ["POLY_API_PASSPHRASE"],
-        )
+        """Initialise and authenticate the CLOB client.
+
+        If POLY_API_KEY/SECRET/PASSPHRASE are set in the environment they are
+        used directly. Otherwise, credentials are derived from PRIVATE_KEY via
+        create_or_derive_api_creds() and printed so you can cache them in .env.
+        """
+        host = os.environ.get("POLY_HOST", "https://clob.polymarket.com")
+        chain_id = int(os.environ.get("CHAIN_ID", "137"))
+        private_key = os.environ["PRIVATE_KEY"]
+
+        # Bootstrap client with just the wallet key to derive creds
+        bootstrap = ClobClient(host=host, chain_id=chain_id, key=private_key)
+
+        api_key = os.environ.get("POLY_API_KEY")
+        if api_key:
+            creds = ApiCreds(
+                api_key=api_key,
+                api_secret=os.environ["POLY_API_SECRET"],
+                api_passphrase=os.environ["POLY_API_PASSPHRASE"],
+            )
+            logger.info("Using existing API credentials from environment")
+        else:
+            logger.info("No API credentials found — deriving from private key...")
+            raw = bootstrap.create_or_derive_api_creds()
+            creds = ApiCreds(
+                api_key=raw["apiKey"],
+                api_secret=raw["secret"],
+                api_passphrase=raw["passphrase"],
+            )
+            logger.info(
+                "Derived credentials — add these to .env to skip derivation next time:\n"
+                "  POLY_API_KEY=%s\n  POLY_API_SECRET=%s\n  POLY_API_PASSPHRASE=%s",
+                raw["apiKey"], raw["secret"], raw["passphrase"],
+            )
+
         self._client = ClobClient(
-            host=os.environ.get("POLY_HOST", "https://clob.polymarket.com"),
-            chain_id=int(os.environ.get("CHAIN_ID", "137")),
-            key=os.environ["POLY_PRIVATE_KEY"],
+            host=host,
+            chain_id=chain_id,
+            key=private_key,
             creds=creds,
         )
         logger.info("Connected to Polymarket CLOB")
